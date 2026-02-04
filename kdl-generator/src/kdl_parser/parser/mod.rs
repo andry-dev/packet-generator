@@ -7,11 +7,12 @@ use std::{
 
 use kdl::{KdlDocument, KdlNode};
 use miette::Severity;
+use slotmap::SlotMap;
 
 use crate::{
     kdl_parser::{
         Diagnostic, ParserOpts, ParsingError, ParsingWarnings, SourceInfo,
-        schema::{EnumDefinition, RawDocument},
+        schema::{DataTypeStorage, EnumDefinition, RawDocument},
     },
     vfs::{Vfs, VfsPathBuf},
 };
@@ -358,6 +359,7 @@ impl KdlNodeUtilsExt for KdlNode {
 
 fn parse_all_definitions(
     raw_document: &mut RawDocument,
+    datatypes: &mut DataTypeStorage,
     definitions: &[KdlNode],
     source_info: &Arc<SourceInfo>,
 ) -> Result<Vec<Diagnostic>, ParsingError> {
@@ -366,7 +368,8 @@ fn parse_all_definitions(
     for (index, definition) in definitions.iter().enumerate() {
         match definition.name().value() {
             JSON_DEFINITION_NAME => {
-                match json_parser::parse_data_definition(definition, source_info, index) {
+                match json_parser::parse_data_definition(definition, datatypes, source_info, index)
+                {
                     Ok(def) => {
                         raw_document.json_definitions.push(def);
                     }
@@ -510,6 +513,7 @@ where
 
 fn parse_single_document<S: AsRef<str>, V: Vfs>(
     document: S,
+    global_datatypes: &mut DataTypeStorage,
     filepath: &PathBuf,
     visited_documents: &mut HashSet<VfsPathBuf>,
     opts: &ParserOpts<V>,
@@ -524,6 +528,7 @@ fn parse_single_document<S: AsRef<str>, V: Vfs>(
 
     let mut raw_document = RawDocument {
         filepath: Some(filepath.into()),
+        datatypes: DataTypeStorage::with_key(),
         json_definitions: vec![],
         http_definitions: vec![],
         enum_definitions: vec![],
@@ -566,8 +571,13 @@ fn parse_single_document<S: AsRef<str>, V: Vfs>(
     for (path, canonical_path) in unvisited_includes {
         let other_document = opts.vfs.read_file_to_string(&V::normalize_path(&path)?)?;
         visited_documents.insert(canonical_path);
-        let (other_root, other_diagnostics) =
-            parse_single_document(other_document, &path, visited_documents, opts)?;
+        let (other_root, other_diagnostics) = parse_single_document(
+            other_document,
+            global_datatypes,
+            &path,
+            visited_documents,
+            opts,
+        )?;
 
         // last_json_index = {
         //     let mut last_max_seen = last_json_index;
@@ -596,7 +606,8 @@ fn parse_single_document<S: AsRef<str>, V: Vfs>(
     }
 
     {
-        let diagnostics = parse_all_definitions(&mut raw_document, children, &source_info)?;
+        let diagnostics =
+            parse_all_definitions(&mut raw_document, global_datatypes, children, &source_info)?;
         erroring_diagnostics.extend(diagnostics);
     }
 
@@ -632,7 +643,18 @@ pub fn raw_parse_kdl<S: AsRef<str>, V: Vfs>(
     opts: &ParserOpts<V>,
 ) -> Result<(RawDocument, ParsingWarnings), ParsingError> {
     let root_canonical_path = V::normalize_path(filepath)?;
+    let mut datatypes = DataTypeStorage::with_key();
 
     let mut visited_documents = HashSet::from_iter([root_canonical_path]);
-    parse_single_document(document, filepath, &mut visited_documents, opts)
+    let (mut doc, warnings) = parse_single_document(
+        document,
+        &mut datatypes,
+        filepath,
+        &mut visited_documents,
+        opts,
+    )?;
+
+    doc.datatypes = datatypes;
+
+    Ok((doc, warnings))
 }

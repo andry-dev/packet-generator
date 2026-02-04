@@ -2,22 +2,15 @@ use std::{collections::BTreeSet, fmt::Display, path::PathBuf, str::FromStr, sync
 
 use slotmap::SlotMap;
 
-slotmap::new_key_type! {
-    struct JsonFieldRef;
-}
-
-slotmap::new_key_type! {
-    struct IntEnumVariantRef;
-}
-
-slotmap::new_key_type! {
-    struct StringEnumVariantRef;
-}
-
 mod validator;
 
 use miette::SourceSpan;
 pub use validator::validate;
+
+slotmap::new_key_type! {
+    pub struct DataTypeRef;
+}
+pub type DataTypeStorage = SlotMap<DataTypeRef, DataType>;
 
 use crate::{
     intermediate::{IntEnumVariant, StringEnumVariant},
@@ -28,11 +21,20 @@ use crate::{
 pub struct RawDocument {
     pub filepath: Option<PathBuf>,
 
+    pub datatypes: DataTypeStorage,
+
     pub json_definitions: Vec<JsonDefinition>,
 
     pub http_definitions: Vec<HTTPDefinition>,
 
     pub enum_definitions: Vec<EnumDefinition>,
+}
+
+impl RawDocument {
+    #[must_use]
+    pub fn resolve_datatype(&self, reference: DataTypeRef) -> Option<&DataType> {
+        self.datatypes.get(reference)
+    }
 }
 
 #[derive(Debug)]
@@ -283,20 +285,20 @@ pub enum DataType {
 
     /// An array typically represented as a string separated by a separator.
     StringArray {
-        inner: Arc<Self>,
+        inner: DataTypeRef,
         separator: ArraySeparator,
     },
 
     /// A normal array.
-    Array(Arc<Self>),
+    Array(DataTypeRef),
 
     /// Like `Array` but it only holds a single element.
-    SingleElementArray(Arc<Self>),
+    SingleElementArray(DataTypeRef),
 
     /// Dictionary from one type to another.
     Map {
-        key: Arc<Self>,
-        value: Arc<Self>,
+        key: DataTypeRef,
+        value: DataTypeRef,
     },
 
     // Tuple(Vec<DataType>),
@@ -316,10 +318,10 @@ impl Display for DataType {
             Self::Datetime => write!(f, "datetime"),
             Self::DatetimeUnix => write!(f, "datetime-unix"),
             Self::String => write!(f, "string"),
-            Self::Array(inner) => write!(f, "[{inner}]"),
-            Self::StringArray { inner, separator } => write!(f, "[{inner}]::sep({separator})"),
-            Self::SingleElementArray(data_type) => write!(f, "[{data_type}]::size(1)"),
-            Self::Map { key, value } => write!(f, "{key} => {value}"),
+            Self::Array(inner) => write!(f, "[{inner:?}]"),
+            Self::StringArray { inner, separator } => write!(f, "[{inner:?}]::sep({separator})"),
+            Self::SingleElementArray(data_type) => write!(f, "[{data_type:?}]::size(1)"),
+            Self::Map { key, value } => write!(f, "{key:?} => {value:?}"),
             Self::Custom(s) => write!(f, "{s}"),
         }
     }

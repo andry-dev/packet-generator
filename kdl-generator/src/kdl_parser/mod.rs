@@ -336,13 +336,14 @@ mod document_to_intermediate {
             Definition, Encoding, Json, JsonField, PartialDefinitionRegistry,
         },
         kdl_parser::schema::{
-            self, BoolEncoding, DataType as SchemaDataType, IntLikeEncoding,
+            self, BoolEncoding, DataType as SchemaDataType, DataTypeStorage, IntLikeEncoding,
             JsonDefinition as SchemaJsonDefinition, JsonField as SchemaJsonField,
         },
     };
 
     fn convert_datatype_recursive(
         type_: &schema::DataType,
+        datatypes: &DataTypeStorage,
         registry: &mut PartialDefinitionRegistry,
     ) -> intermediate::DataType {
         match type_ {
@@ -412,41 +413,62 @@ mod document_to_intermediate {
 
             SchemaDataType::String => IntermediateDataType::String,
 
-            SchemaDataType::Array(datatype) => IntermediateDataType::Array {
-                inner_type: Arc::new(convert_datatype_recursive(datatype, registry)),
-            },
+            SchemaDataType::Array(datatype) => {
+                let inner_type = &datatypes[*datatype];
+                IntermediateDataType::Array {
+                    inner_type: Arc::new(convert_datatype_recursive(
+                        inner_type, datatypes, registry,
+                    )),
+                }
+            }
 
             SchemaDataType::StringArray { inner, separator } => {
                 use crate::kdl_parser::schema;
 
+                let inner = &datatypes[*inner];
+
                 match separator {
                     schema::ArraySeparator::Comma => intermediate::DataType::StringArray {
                         separator: intermediate::ArraySeparator::Comma,
-                        inner_type: Arc::new(convert_datatype_recursive(inner, registry)),
+                        inner_type: Arc::new(convert_datatype_recursive(
+                            inner, datatypes, registry,
+                        )),
                     },
 
                     schema::ArraySeparator::At => intermediate::DataType::StringArray {
                         separator: intermediate::ArraySeparator::At,
-                        inner_type: Arc::new(convert_datatype_recursive(inner, registry)),
+                        inner_type: Arc::new(convert_datatype_recursive(
+                            inner, datatypes, registry,
+                        )),
                     },
 
                     schema::ArraySeparator::Colon => intermediate::DataType::StringArray {
                         separator: intermediate::ArraySeparator::Colon,
-                        inner_type: Arc::new(convert_datatype_recursive(inner, registry)),
+                        inner_type: Arc::new(convert_datatype_recursive(
+                            inner, datatypes, registry,
+                        )),
                     },
                 }
             }
 
             SchemaDataType::SingleElementArray(data_type) => {
+                let data_type = &datatypes[*data_type];
                 intermediate::DataType::SingleElementArray {
-                    inner_type: Arc::new(convert_datatype_recursive(data_type, registry)),
+                    inner_type: Arc::new(convert_datatype_recursive(
+                        data_type, datatypes, registry,
+                    )),
                 }
             }
 
-            SchemaDataType::Map { key, value } => intermediate::DataType::Map {
-                key: Arc::new(convert_datatype_recursive(key, registry)),
-                value: Arc::new(convert_datatype_recursive(value, registry)),
-            },
+            SchemaDataType::Map { key, value } => {
+                let key = &datatypes[*key];
+                let value = &datatypes[*value];
+
+                intermediate::DataType::Map {
+                    key: Arc::new(convert_datatype_recursive(key, datatypes, registry)),
+                    value: Arc::new(convert_datatype_recursive(value, datatypes, registry)),
+                }
+            }
 
             SchemaDataType::Custom(s) => {
                 if let Some(idx) = registry.find_weak(s) {
@@ -460,9 +482,10 @@ mod document_to_intermediate {
 
     fn convert_json_datatype(
         schema_field: &SchemaJsonField,
+        datatypes: &DataTypeStorage,
         registry: &mut PartialDefinitionRegistry,
     ) -> IntermediateDataType {
-        convert_datatype_recursive(&schema_field.r#type, registry)
+        convert_datatype_recursive(&schema_field.r#type, datatypes, registry)
     }
 
     pub fn add_enum_definitions(
@@ -487,20 +510,21 @@ mod document_to_intermediate {
     }
 
     pub fn add_json_definitions(
+        datatypes: &DataTypeStorage,
         registry: &mut PartialDefinitionRegistry,
         structs: Vec<SchemaJsonDefinition>,
     ) {
         for struct_ in structs {
             let mut struct_def = Json::new(struct_.name, struct_.index, struct_.hash, struct_.doc);
 
-            for field in struct_.fields {
+            for field in &struct_.fields {
                 struct_def.add_field(JsonField {
                     index: field.index,
                     name: field.name.clone().into(),
                     key: field.key.clone(),
-                    type_: convert_json_datatype(&field, registry),
+                    type_: convert_json_datatype(&field, datatypes, registry),
                     optional: field.optional,
-                    doc: field.doc,
+                    doc: field.doc.clone(),
                 });
             }
 
@@ -514,7 +538,11 @@ pub fn document_to_definitions(document: Document) -> Result<DefinitionRegistry,
     let mut registry = PartialDefinitionRegistry::new();
 
     document_to_intermediate::add_enum_definitions(&mut registry, document.0.enum_definitions);
-    document_to_intermediate::add_json_definitions(&mut registry, document.0.json_definitions);
+    document_to_intermediate::add_json_definitions(
+        &document.0.datatypes,
+        &mut registry,
+        document.0.json_definitions,
+    );
 
     registry.finalize()
 }

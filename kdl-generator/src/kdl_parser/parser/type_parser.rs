@@ -4,20 +4,20 @@ use miette::{Severity, SourceSpan};
 use winnow::{LocatingSlice, Parser};
 
 use crate::kdl_parser::SourceInfo;
-use crate::kdl_parser::parser::type_parser::combinator_solution::Error;
-use crate::kdl_parser::{Diagnostic, ParsingError, schema::IntLikeEncoding};
+use crate::kdl_parser::parser::type_parser::combinators::Error;
+use crate::kdl_parser::{Diagnostic, ParsingError};
 
-use crate::kdl_parser::schema::DataType;
+use crate::kdl_parser::schema::{DataType, DataTypeStorage};
 
 pub fn generic_parse(
     input: &str,
-    _encoding: Option<IntLikeEncoding>,
+    datatypes: &mut DataTypeStorage,
     source_code: &Arc<SourceInfo>,
     span: SourceSpan,
 ) -> Result<DataType, ParsingError> {
     let input = combinators::Input {
         input: LocatingSlice::new(input),
-        state: combinators::State {},
+        state: datatypes,
     };
 
     let parsing_res = combinators::parse_datatype.parse(input);
@@ -92,9 +92,10 @@ fn convert_error_to_diagnostic(
 #[allow(dead_code)]
 mod combinators {
     use std::fmt::Display;
-    use std::sync::Arc;
 
-    use crate::kdl_parser::schema::{ArraySeparator, BoolEncoding, DataType, IntLikeEncoding};
+    use crate::kdl_parser::schema::{
+        ArraySeparator, BoolEncoding, DataType, DataTypeStorage, IntLikeEncoding,
+    };
     use miette::SourceSpan;
     use winnow::ascii::{alpha1, alphanumeric1, space0, space1};
     use winnow::combinator::{
@@ -109,7 +110,7 @@ mod combinators {
     #[derive(Clone, Debug)]
     pub struct State {}
 
-    pub type Input<'i> = Stateful<LocatingSlice<&'i str>, State>;
+    pub type Input<'i> = Stateful<LocatingSlice<&'i str>, &'i mut DataTypeStorage>;
 
     #[derive(Debug, Clone)]
     pub struct Error {
@@ -203,7 +204,7 @@ mod combinators {
         }
     }
 
-    impl<I: Stream + Clone> ParserError<I> for Error {
+    impl<I: Stream> ParserError<I> for Error {
         type Inner = Self;
 
         fn from_input(_input: &I) -> Self {
@@ -278,8 +279,8 @@ mod combinators {
                                 });
 
                             let last_encoding = valid_modifiers.last().and_then(|s| match s.name {
-                                "int" => Some(TypeEncoding::Int),
-                                "str" => Some(TypeEncoding::String),
+                                "int" => Some(IntLikeEncoding::Int),
+                                "str" => Some(IntLikeEncoding::String),
                                 _ => None,
                             });
 
@@ -457,7 +458,7 @@ mod combinators {
     }
 
     fn parse_map(input: &mut Input) -> PResult {
-        delimited(
+        let ((k, v), _maybe_modifiers) = delimited(
             ("%{", space0),
             (
                 separated_pair(
@@ -473,11 +474,12 @@ mod combinators {
             ),
             (space0, "}"),
         )
-        .map(|((x, y), _maybe_modifiers)| DataType::Map {
-            key: Arc::new(x),
-            value: Arc::new(y),
-        })
-        .parse_next(input)
+        .parse_next(input)?;
+
+        let key = input.state.insert(k);
+        let value = input.state.insert(v);
+
+        Ok(DataType::Map { key, value })
     }
 
     fn parse_array(input: &mut Input) -> PResult {
@@ -488,7 +490,7 @@ mod combinators {
             NormalArray,
         }
 
-        (delimited("[", parse_datatype, "]"),
+        let (inner, array_type) = (delimited("[", parse_datatype, "]"),
             cut_err(opt(parse_modifier).try_map(|maybe_modifiers| {
                 match maybe_modifiers {
 
@@ -576,14 +578,17 @@ mod combinators {
             }
             })
             ))
-            .map(|(inner, array_type)| {
-                match array_type {
-                    PartialArrayType::SingleElement => DataType::SingleElementArray(inner.into()),
-                    PartialArrayType::NormalArray => DataType::Array(inner.into()),
-                    PartialArrayType::StringArray { separator } => DataType::StringArray { inner: inner.into(), separator},
-                }
-            })
-            .parse_next(input)
+            .parse_next(input)?;
+
+        let datatype_ref = input.state.insert(inner.clone());
+        match array_type {
+            PartialArrayType::SingleElement => Ok(DataType::SingleElementArray(datatype_ref)),
+            PartialArrayType::NormalArray => Ok(DataType::Array(datatype_ref)),
+            PartialArrayType::StringArray { separator } => Ok(DataType::StringArray {
+                inner: datatype_ref,
+                separator,
+            }),
+        }
     }
 
     fn parse_modifier<'a>(input: &mut Input<'a>) -> PResult<Vec<Modifier<'a>>> {
@@ -643,24 +648,25 @@ mod combinators {
 
         #[test]
         fn errors_on_unspecified_i32() {
-            let s = "i32";
-            let mut input = Input {
-                input: LocatingSlice::new(s),
-                state: State {},
+            let mut map = DataTypeStorage::with_key();
+            let mut s = Stateful {
+                input: LocatingSlice::new("i32"),
+                state: &mut map,
             };
-            let val = parse_datatype(&mut input);
+
+            let val = parse_datatype(&mut s);
             println!("{val:?}");
             assert!(val.is_err());
         }
 
         #[test]
         fn can_parse_string_encoded_i32() {
-            let s = "i32::str";
-            let mut input = Input {
-                input: LocatingSlice::new(s),
-                state: State {},
+            let mut map = DataTypeStorage::with_key();
+            let mut s = Input {
+                input: LocatingSlice::new("i32::str"),
+                state: &mut map,
             };
-            let val = parse_datatype(&mut input);
+            let val = parse_datatype(&mut s);
             assert!(matches!(
                 val,
                 Ok(DataType::I32 {
@@ -671,12 +677,12 @@ mod combinators {
 
         #[test]
         fn can_parse_string_encoded_i32_with_extra() {
-            let s = "i32::{str, foo}";
-            let mut input = Input {
-                input: LocatingSlice::new(s),
-                state: State {},
+            let mut map = DataTypeStorage::with_key();
+            let mut s = Input {
+                input: LocatingSlice::new("i32::{str, foo}"),
+                state: &mut map,
             };
-            let val = parse_datatype(&mut input);
+            let val = parse_datatype(&mut s);
             assert!(matches!(
                 val,
                 Ok(DataType::I32 {
@@ -687,12 +693,12 @@ mod combinators {
 
         #[test]
         fn can_parse_int_encoded_i32() {
-            let s = "i32::int";
-            let mut input = Input {
-                input: LocatingSlice::new(s),
-                state: State {},
+            let mut map = DataTypeStorage::with_key();
+            let mut s = Input {
+                input: LocatingSlice::new("i32::int"),
+                state: &mut map,
             };
-            let val = parse_datatype(&mut input);
+            let val = parse_datatype(&mut s);
             assert!(matches!(
                 val,
                 Ok(DataType::I32 {
@@ -703,34 +709,34 @@ mod combinators {
 
         #[test]
         fn arrays_of_primitive_require_encoding() {
-            let s = "[i32]";
-            let mut input = Input {
-                input: LocatingSlice::new(s),
-                state: State {},
+            let mut map = DataTypeStorage::with_key();
+            let mut s = Input {
+                input: LocatingSlice::new("[i32]"),
+                state: &mut map,
             };
-            let val = parse_datatype(&mut input);
+            let val = parse_datatype(&mut s);
             assert!(matches!(val, Err(..)));
         }
 
         #[test]
         fn can_parse_normal_arrays() {
-            let s = "[i32::int]";
-            let mut input = Input {
-                input: LocatingSlice::new(s),
-                state: State {},
+            let mut map = DataTypeStorage::with_key();
+            let mut s = Input {
+                input: LocatingSlice::new("[i32::int]"),
+                state: &mut map,
             };
-            let val = parse_datatype(&mut input);
+            let val = parse_datatype(&mut s);
             assert!(matches!(val, Ok(DataType::Array { .. })));
         }
 
         #[test]
         fn can_parse_string_at_arrays() {
-            let s = "[str]::sep(at)";
-            let mut input = Input {
-                input: LocatingSlice::new(s),
-                state: State {},
+            let mut map = DataTypeStorage::with_key();
+            let mut s = Input {
+                input: LocatingSlice::new("[str]::sep(at)"),
+                state: &mut map,
             };
-            let val = parse_datatype(&mut input);
+            let val = parse_datatype(&mut s);
             assert!(matches!(
                 val,
                 Ok(DataType::StringArray {
@@ -742,12 +748,12 @@ mod combinators {
 
         #[test]
         fn can_parse_string_comma_arrays() {
-            let s = "[str]::sep(comma)";
-            let mut input = Input {
-                input: LocatingSlice::new(s),
-                state: State {},
+            let mut map = DataTypeStorage::with_key();
+            let mut s = Input {
+                input: LocatingSlice::new("[str]::sep(comma)"),
+                state: &mut map,
             };
-            let val = parse_datatype(&mut input);
+            let val = parse_datatype(&mut s);
             assert!(matches!(
                 val,
                 Ok(DataType::StringArray {
@@ -759,12 +765,12 @@ mod combinators {
 
         #[test]
         fn can_parse_string_colon_arrays() {
-            let s = "[str]::sep(colon)";
-            let mut input = Input {
-                input: LocatingSlice::new(s),
-                state: State {},
+            let mut map = DataTypeStorage::with_key();
+            let mut s = Input {
+                input: LocatingSlice::new("[str]::sep(colon)"),
+                state: &mut map,
             };
-            let val = parse_datatype(&mut input);
+            let val = parse_datatype(&mut s);
             assert!(matches!(
                 val,
                 Ok(DataType::StringArray {
@@ -776,61 +782,62 @@ mod combinators {
 
         #[test]
         fn can_parse_sized_arrays() {
-            let s = "[i32::int]::size(1)";
-            let mut input = Input {
-                input: LocatingSlice::new(s),
-                state: State {},
+            let mut map = DataTypeStorage::with_key();
+            let mut s = Input {
+                input: LocatingSlice::new("[i32::int]::size(1)"),
+                state: &mut map,
             };
-            let val = parse_datatype(&mut input);
+            let val = parse_datatype(&mut s);
             assert!(matches!(val, Ok(DataType::SingleElementArray { .. })));
         }
 
         #[test]
         fn can_parse_datetime() {
-            let s = "datetime";
-            let mut input = Input {
-                input: LocatingSlice::new(s),
-                state: State {},
+            let mut map = DataTypeStorage::with_key();
+            let mut s = Input {
+                input: LocatingSlice::new("datetime"),
+                state: &mut map,
             };
-            let val = parse_datatype(&mut input);
+            let val = parse_datatype(&mut s);
             assert!(matches!(val, Ok(DataType::Datetime)));
         }
 
         #[test]
         fn can_parse_datetime_unix() {
-            let s = "datetime-unix";
-            let mut input = Input {
-                input: LocatingSlice::new(s),
-                state: State {},
+            let mut map = DataTypeStorage::with_key();
+            let mut s = Input {
+                input: LocatingSlice::new("datetime-unix"),
+                state: &mut map,
             };
-            let val = parse_datatype(&mut input);
+            let val = parse_datatype(&mut s);
             assert!(matches!(val, Ok(DataType::DatetimeUnix)));
         }
 
         #[test]
         fn can_parse_custom_type() {
-            let s = "Foo";
-            let mut input = Input {
-                input: LocatingSlice::new(s),
-                state: State {},
+            let mut map = DataTypeStorage::with_key();
+            let mut s = Input {
+                input: LocatingSlice::new("Foo"),
+                state: &mut map,
             };
-            let val = parse_datatype(&mut input);
+            let val = parse_datatype(&mut s);
             assert!(matches!(val, Ok(DataType::Custom(..))));
         }
 
         #[test]
         fn can_parse_ambigous_custom_type() {
+            let mut map = DataTypeStorage::with_key();
             let vals = &[
                 "strange", // starts with "str"
                 "i32foo", "f64foo",
             ];
 
             for &v in vals {
-                let mut input = Input {
+                let mut x = Input {
                     input: LocatingSlice::new(v),
-                    state: State {},
+                    state: &mut map,
                 };
-                let val = parse_datatype(&mut input);
+                let val = parse_datatype(&mut x);
                 assert!(!matches!(val, Ok(DataType::String)));
                 assert!(matches!(val, Ok(DataType::Custom(..))));
             }
@@ -838,34 +845,36 @@ mod combinators {
 
         #[test]
         fn can_parse_maps() {
-            let s = "%{i32::str => i64::str}";
-            let mut input = Input {
-                input: LocatingSlice::new(s),
-                state: State {},
+            let mut map = DataTypeStorage::with_key();
+            let mut s = Input {
+                input: LocatingSlice::new("%{i32::str => i64::str}"),
+                state: &mut map,
             };
-            let val = parse_datatype(&mut input);
+            let val = parse_datatype(&mut s);
             assert!(matches!(val, Ok(DataType::Map { .. })));
         }
 
         #[test]
         fn can_parse_nested_maps() {
-            let s = "%{i32::str => %{i64::str => f32::int}}";
-            let mut input = Input {
-                input: LocatingSlice::new(s),
-                state: State {},
+            let mut map = DataTypeStorage::with_key();
+            let mut s = Input {
+                input: LocatingSlice::new("%{i32::str => %{i64::str => f32::int}}"),
+                state: &mut map,
             };
-            let val = parse_datatype(&mut input);
+            let val = parse_datatype(&mut s);
             assert!(matches!(val, Ok(DataType::Map { .. })));
         }
 
         #[test]
         fn way_too_many_parenthesis() {
-            let s = "[[[%{i32::{str} => %{i64::{str, foo(x, y, z)} => f32::{int, bar(x)}}}]::size(1)]::sep(comma)]";
-            let mut input = Input {
-                input: LocatingSlice::new(s),
-                state: State {},
+            let mut map = DataTypeStorage::with_key();
+            let mut s = Input {
+                input: LocatingSlice::new(
+                    "[[[%{i32::{str} => %{i64::{str, foo(x, y, z)} => f32::{int, bar(x)}}}]::size(1)]::sep(comma)]",
+                ),
+                state: &mut map,
             };
-            let val = parse_datatype(&mut input);
+            let val = parse_datatype(&mut s);
             assert!(matches!(val, Ok(DataType::Array { .. })));
         }
     }

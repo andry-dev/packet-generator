@@ -6,7 +6,7 @@ use miette::Severity;
 use crate::kdl_parser::{
     Diagnostic, ParsingError, SourceInfo,
     parser::{ErrorContext, KdlDocumentUtilsExt, KdlNodeUtilsExt, type_parser::generic_parse},
-    schema::{IntLikeEncoding, JsonDefinition, JsonField},
+    schema::{DataTypeStorage, IntLikeEncoding, JsonDefinition, JsonField},
 };
 
 const DEFAULT_ENCODING_PROPERTY: &str = "default-encoding";
@@ -22,6 +22,7 @@ const TRANSPARENT_PROPERTY_NAME: &str = "transparent";
 
 pub fn parse_data_definition(
     definition: &KdlNode,
+    datatypes: &mut DataTypeStorage,
     source_code: &Arc<SourceInfo>,
     index: usize,
 ) -> Result<JsonDefinition, ParsingError> {
@@ -34,36 +35,6 @@ pub fn parse_data_definition(
             wrong_type_help: Some("give it a name as a string".into()),
         },
     )?;
-
-    let maybe_default_encoding = definition
-        .get(DEFAULT_ENCODING_PROPERTY)
-        .map(|prop| {
-            prop.as_string().ok_or_else(|| {
-                ParsingError::from(Diagnostic {
-                    message: format!("property `{DEFAULT_ENCODING_PROPERTY}` in JSON definition `Foo` is not a string"),
-                    severity: Severity::Error,
-                    source_info: source_code.clone(),
-                    span: definition.span(),
-                    help: Some("provide one of `str` or `int`".to_owned()),
-                    label: None,
-                    related: vec![],
-                })
-            })
-        })
-        .transpose()?
-        .map(IntLikeEncoding::from_str)
-        .transpose()
-        .map_err(|e| {
-            ParsingError::from(Diagnostic {
-                message: e,
-                severity: Severity::Warning,
-                source_info: source_code.clone(),
-                span: definition.span(),
-                help: None,
-                label: None,
-                related: vec![],
-            })
-        })?;
 
     let data_children = definition.children().ok_or_else(|| {
         ParsingError::from(Diagnostic {
@@ -120,15 +91,7 @@ pub fn parse_data_definition(
         .iter()
         .filter(|&node| node.name().value() == FIELD_DEFINITOIN)
         .enumerate()
-        .map(|(index, node)| {
-            parse_field(
-                node,
-                source_code.clone(),
-                name,
-                maybe_default_encoding,
-                index,
-            )
-        })
+        .map(|(index, node)| parse_field(node, datatypes, source_code.clone(), name, index))
         .collect::<Result<Vec<JsonField>, ParsingError>>()?;
 
     Ok(JsonDefinition {
@@ -144,9 +107,9 @@ pub fn parse_data_definition(
 
 fn parse_field(
     node: &KdlNode,
+    datatypes: &mut DataTypeStorage,
     source_code: Arc<SourceInfo>,
     data_name: &str,
-    maybe_default_encoding: Option<IntLikeEncoding>,
     index: usize,
 ) -> Result<JsonField, ParsingError> {
     let field_node = node.extract_argument_string(
@@ -158,24 +121,6 @@ fn parse_field(
             wrong_type_help: None,
         },
     )?;
-
-    let maybe_encoding = node
-        .get("encoding")
-        .and_then(|v| v.as_string())
-        .map(IntLikeEncoding::from_str)
-        .transpose()
-        .map_err(|e| {
-            ParsingError::from(Diagnostic {
-                message: e,
-                severity: Severity::Warning,
-                source_info: source_code.clone(),
-                span: node.span(),
-                help: None,
-                label: None,
-                related: vec![],
-            })
-        })?
-        .or(maybe_default_encoding);
 
     let datatype = {
         let datatype_entry =
@@ -205,12 +150,7 @@ fn parse_field(
                 related: vec![],
             }))?;
 
-        generic_parse(
-            datatype_str,
-            maybe_encoding,
-            &source_code,
-            datatype_entry.span(),
-        )
+        generic_parse(datatype_str, datatypes, &source_code, datatype_entry.span())
     }?;
 
     let children = node.extract_children(ErrorContext {
