@@ -24,6 +24,7 @@ winnow = { version = "0.7.14", features = ["simd"] }
 stringcase = "0.4.0"
 clean-path = "0.2"
 petgraph = "0.8.3"
+slotmap = "1.1.1"
 kdl = "6.5.0"
 
 [dev-dependencies]
