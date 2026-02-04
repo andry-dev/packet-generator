@@ -1,5 +1,19 @@
 use std::{collections::BTreeSet, fmt::Display, path::PathBuf, str::FromStr, sync::Arc};
 
+use slotmap::SlotMap;
+
+slotmap::new_key_type! {
+    struct JsonFieldRef;
+}
+
+slotmap::new_key_type! {
+    struct IntEnumVariantRef;
+}
+
+slotmap::new_key_type! {
+    struct StringEnumVariantRef;
+}
+
 mod validator;
 
 use miette::SourceSpan;
@@ -153,7 +167,7 @@ pub struct HTTPProperty {
 
     pub r#type: DataType,
 
-    pub r#encoding: Option<TypeEncoding>,
+    pub r#encoding: Option<IntLikeEncoding>,
 
     pub key: String,
 
@@ -196,11 +210,11 @@ pub enum ArraySeparator {
     /// [i32] = "1@3@4@5@6"
     At,
 
-    /// Array separated by '|'
+    /// Array separated by ';'
     ///
     /// ## Example
     ///
-    /// [i32] = "1|3|4|5|6"
+    /// [i32] = "1;3;4;5;6"
     Colon,
 }
 
@@ -211,9 +225,9 @@ impl FromStr for ArraySeparator {
         match s {
             "," => Ok(Self::Comma),
             "@" => Ok(Self::At),
-            "|" => Ok(Self::Colon),
+            ";" => Ok(Self::Colon),
             _ => Err(
-                "expected to find one of `,` (comma), `@` (at), or `|` (colon) as array separator",
+                "expected to find one of `,` (comma), `@` (at), or `;` (colon) as array separator",
             ),
         }
     }
@@ -224,7 +238,7 @@ impl Display for ArraySeparator {
         match self {
             Self::Comma => write!(f, ","),
             Self::At => write!(f, "@"),
-            Self::Colon => write!(f, "|"),
+            Self::Colon => write!(f, ";"),
         }
     }
 }
@@ -233,23 +247,23 @@ impl Display for ArraySeparator {
 #[allow(dead_code)]
 pub enum DataType {
     I32 {
-        encoding: TypeEncoding,
+        encoding: IntLikeEncoding,
     },
 
     U32 {
-        encoding: TypeEncoding,
+        encoding: IntLikeEncoding,
     },
 
     I64 {
-        encoding: TypeEncoding,
+        encoding: IntLikeEncoding,
     },
 
     U64 {
-        encoding: TypeEncoding,
+        encoding: IntLikeEncoding,
     },
 
     F32 {
-        encoding: TypeEncoding,
+        encoding: IntLikeEncoding,
     },
 
     // NOTE(anri, 2026-01-11): a string-encoded 64-bit float does not exist yet.
@@ -303,8 +317,8 @@ impl Display for DataType {
             Self::DatetimeUnix => write!(f, "datetime-unix"),
             Self::String => write!(f, "string"),
             Self::Array(inner) => write!(f, "[{inner}]"),
-            Self::StringArray { inner, separator } => write!(f, "[{inner}{separator}]"),
-            Self::SingleElementArray(data_type) => write!(f, "[{data_type}]"),
+            Self::StringArray { inner, separator } => write!(f, "[{inner}]::sep({separator})"),
+            Self::SingleElementArray(data_type) => write!(f, "[{data_type}]::size(1)"),
             Self::Map { key, value } => write!(f, "{key} => {value}"),
             Self::Custom(s) => write!(f, "{s}"),
         }
@@ -312,12 +326,12 @@ impl Display for DataType {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum TypeEncoding {
+pub enum IntLikeEncoding {
     String,
     Int,
 }
 
-impl FromStr for TypeEncoding {
+impl FromStr for IntLikeEncoding {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {

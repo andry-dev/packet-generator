@@ -4,14 +4,14 @@ use miette::{Severity, SourceSpan};
 use winnow::{LocatingSlice, Parser};
 
 use crate::kdl_parser::SourceInfo;
-use crate::kdl_parser::parser::type_parser::combinators::Error;
-use crate::kdl_parser::{Diagnostic, ParsingError, schema::TypeEncoding};
+use crate::kdl_parser::parser::type_parser::combinator_solution::Error;
+use crate::kdl_parser::{Diagnostic, ParsingError, schema::IntLikeEncoding};
 
 use crate::kdl_parser::schema::DataType;
 
 pub fn generic_parse(
     input: &str,
-    _encoding: Option<TypeEncoding>,
+    _encoding: Option<IntLikeEncoding>,
     source_code: &Arc<SourceInfo>,
     span: SourceSpan,
 ) -> Result<DataType, ParsingError> {
@@ -94,7 +94,7 @@ mod combinators {
     use std::fmt::Display;
     use std::sync::Arc;
 
-    use crate::kdl_parser::schema::{ArraySeparator, BoolEncoding, DataType, TypeEncoding};
+    use crate::kdl_parser::schema::{ArraySeparator, BoolEncoding, DataType, IntLikeEncoding};
     use miette::SourceSpan;
     use winnow::ascii::{alpha1, alphanumeric1, space0, space1};
     use winnow::combinator::{
@@ -637,7 +637,7 @@ mod combinators {
 
     #[cfg(test)]
     mod tests {
-        use crate::kdl_parser::schema::{DataType, TypeEncoding};
+        use crate::kdl_parser::schema::{DataType, IntLikeEncoding};
 
         use super::*;
 
@@ -664,7 +664,7 @@ mod combinators {
             assert!(matches!(
                 val,
                 Ok(DataType::I32 {
-                    encoding: TypeEncoding::String
+                    encoding: IntLikeEncoding::String
                 })
             ));
         }
@@ -680,7 +680,7 @@ mod combinators {
             assert!(matches!(
                 val,
                 Ok(DataType::I32 {
-                    encoding: TypeEncoding::String
+                    encoding: IntLikeEncoding::String
                 })
             ));
         }
@@ -696,7 +696,7 @@ mod combinators {
             assert!(matches!(
                 val,
                 Ok(DataType::I32 {
-                    encoding: TypeEncoding::Int
+                    encoding: IntLikeEncoding::Int
                 })
             ));
         }
