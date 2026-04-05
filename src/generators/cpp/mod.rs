@@ -48,7 +48,7 @@ fn enum_variant_format(string: &str) -> String {
     string.to_pascal_case()
 }
 
-fn field_format(string: &str) -> String {
+fn struct_field_format(string: &str) -> String {
     string.to_snake_case()
 }
 
@@ -153,7 +153,7 @@ impl Generator for CxxGenerator {
     }
 
     fn json_field_name<'a>(&'a self, definition: &'a JsonField) -> CowArc<'a, str> {
-        CowArc::Owned(field_format(&definition.name).into())
+        CowArc::Owned(struct_field_format(&definition.name).into())
     }
 
     fn int_enum_name<'a>(&'a self, definition: &'a IntEnum) -> CowArc<'a, str> {
@@ -304,7 +304,7 @@ fn generate_json_cxx(
                 datatype = Cow::Owned(format!("std::optional<{datatype}>"));
             }
 
-            let name = field_format(&field.name);
+            let name = struct_field_format(&field.name);
             let doc = split_documentation(&field.doc, 0);
 
             Ok(format!(
@@ -343,9 +343,9 @@ fn generate_int_enum_cxx(
             let name = enum_variant_format(&variant.name);
 
             let start = variant.value.unwrap_or(start);
-            let doc = &variant.doc;
+            let doc = split_documentation(&variant.doc, 1);
 
-            format!("\n{TAB}/// {doc}\n{TAB}{name} = {start},")
+            format!("\n{doc}\n{TAB}{name} = {start},")
         })
         .unwrap_or_default();
 
@@ -353,9 +353,9 @@ fn generate_int_enum_cxx(
         .map(|variant| {
             let name = enum_variant_format(&variant.name);
             let maybe_val = variant.value.map(|v| format!(" = {v}")).unwrap_or_default();
-            let doc = &variant.doc;
+            let doc = split_documentation(&variant.doc, 1);
 
-            format!("\n{TAB}/// {doc}\n{TAB}{name}{maybe_val}")
+            format!("\n{doc}\n{TAB}{name}{maybe_val}")
         })
         .join(",\n");
 
@@ -383,9 +383,9 @@ fn generate_str_enum_cxx(
         .sorted_unstable_by_key(|a| a.index)
         .map(|variant| {
             let name = enum_variant_format(&variant.name);
-            let doc = &variant.doc;
+            let doc = split_documentation(&variant.doc, 1);
             let val = &variant.value;
-            format!("\n{TAB}/// {doc}\n{TAB}constexpr const auto {name} = \"{val}\";")
+            format!("\n{doc}\n{TAB}constexpr const auto {name} = \"{val}\";")
         })
         .join("\n");
 
