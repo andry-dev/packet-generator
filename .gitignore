@@ -3,7 +3,8 @@ target/
 perf*
 profile*
 flamegraph*
-mutants.out/
+mutants.out*/
+dhat-heap.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
