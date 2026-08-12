@@ -1,14 +1,18 @@
 use std::path::PathBuf;
 
 mod glaze;
+mod gtest;
 
-pub use glaze::GlazeGenerator;
+pub use glaze::GlazeAddon;
+pub use gtest::GoogleTestAddon;
 
 use atomicow::CowArc;
 use itertools::Itertools;
 use stringcase::Caser;
 
-use crate::generators::{Addon, GeneratedSource, GenerationError, Generator, WithAddons};
+use crate::generators::{
+    Addon, AddonOutput, GeneratedSource, GenerationError, Generator, WithAddons,
+};
 
 use crate::intermediate::{
     ArraySize, DataType, Definition, DefinitionRegistry, IntEnum, Json, JsonField, StringEnum,
@@ -80,8 +84,21 @@ impl Generator for CxxGenerator {
 
         for addon in &self.addons {
             if let Some(preamble) = addon.preamble(registry) {
-                content.push_str(&preamble);
-                content.push_str("\n\n");
+                let preamble = preamble?;
+                match preamble {
+                    AddonOutput::InsertInCurrent { content: to_add } => {
+                        content.push_str(&to_add);
+                        content.push_str("\n\n");
+                    }
+                    AddonOutput::New {
+                        filename: _,
+                        content: _,
+                    } => todo!(),
+                    AddonOutput::InsertInSpecific {
+                        filename: _,
+                        content: _,
+                    } => todo!(),
+                }
             }
         }
 
@@ -115,15 +132,43 @@ impl Generator for CxxGenerator {
 
         for addon in &self.addons {
             if let Some(addon_content) = addon.content(registry) {
-                content.push_str(&addon_content?);
-                content.push('\n');
+                let addon_content = addon_content?;
+                match addon_content {
+                    AddonOutput::InsertInCurrent {
+                        content: addon_content,
+                    } => {
+                        content.push_str(&addon_content);
+                        content.push('\n');
+                    }
+                    AddonOutput::New {
+                        filename: _,
+                        content: _,
+                    } => todo!(),
+                    AddonOutput::InsertInSpecific {
+                        filename: _,
+                        content: _,
+                    } => todo!(),
+                }
             }
         }
 
         for addon in &self.addons {
             if let Some(postamble) = addon.postamble(registry) {
-                content.push_str(&postamble);
-                content.push_str("\n\n");
+                let postamble = postamble?;
+                match postamble {
+                    AddonOutput::InsertInCurrent { content: to_add } => {
+                        content.push_str(&to_add);
+                        content.push_str("\n\n");
+                    }
+                    AddonOutput::New {
+                        filename: _,
+                        content: _,
+                    } => todo!(),
+                    AddonOutput::InsertInSpecific {
+                        filename: _,
+                        content: _,
+                    } => todo!(),
+                }
             }
         }
 

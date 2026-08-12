@@ -7,9 +7,12 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 use std::{env::current_dir, path::PathBuf};
 
 use miette::{Context, miette};
-use packet_generator::generators::write_sources;
 use packet_generator::{
-    generators::{CxxGenerator, GenerationError, Generator, GlazeGenerator, WithAddons},
+    generators::{
+        GenerationError, Generator, WithAddons,
+        cpp::{CxxGenerator, GlazeAddon, GoogleTestAddon},
+        write_sources,
+    },
     kdl_parser::{Diagnostic, ParserOpts, ParsingError},
 };
 
@@ -74,7 +77,9 @@ fn main() -> Result<(), miette::Report> {
 
                     match options.serializer {
                         CxxSerializer::Glaze => {
-                            cxx_generator.add_addon(GlazeGenerator {});
+                            let mut glaze = GlazeAddon::default();
+                            glaze.add_addon(GoogleTestAddon {});
+                            cxx_generator.add_addon(glaze);
                         }
 
                         CxxSerializer::Simdjson => {

@@ -15,11 +15,11 @@ use atomicow::CowArc;
 use petgraph::{algo::Cycle, graph::NodeIndex};
 
 use crate::intermediate::{
-    DataType, DefinitionRegistry, IntEnum, IntEnumVariant, Json, JsonField, StringEnum,
+    DataType, Definition, DefinitionRegistry, IntEnum, IntEnumVariant, Json, JsonField, StringEnum,
     StringEnumVariant,
 };
 
-mod cpp;
+pub mod cpp;
 mod utils;
 
 #[derive(Debug, Clone)]
@@ -29,7 +29,12 @@ pub struct GeneratedSource {
 }
 
 pub trait Generator {
+    /// Generates one or more source files from the given registry.
+    ///
     /// # Errors
+    ///
+    /// Returns [`GenerationError`] if there was a problem generating the
+    /// source.
     fn generate(
         &self,
         registry: &DefinitionRegistry,
@@ -71,21 +76,55 @@ pub trait WithAddons {
         Self: Sized;
 }
 
+pub enum AddonContext<'a> {
+    InFile {
+        filename: &'a Path,
+    },
+
+    InDefinition {
+        filename: &'a Path,
+        name: &'a Definition,
+    },
+}
+
+pub enum AddonOutput<'a> {
+    /// Instructs the Generator to create a new file.
+    New {
+        filename: Cow<'a, Path>,
+        content: Cow<'a, str>,
+    },
+
+    /// Instructs the Generator to include the content in the current file.
+    InsertInCurrent { content: Cow<'a, str> },
+
+    /// Instructs the Generator to include the content in the specified file.
+    InsertInSpecific {
+        filename: Cow<'a, Path>,
+        content: Cow<'a, str>,
+    },
+}
+
 pub trait Addon: Debug {
     type For;
 
-    fn preamble(&self, _registry: &DefinitionRegistry) -> Option<Cow<'static, str>> {
+    fn preamble(
+        &self,
+        _registry: &DefinitionRegistry,
+    ) -> Option<Result<AddonOutput<'_>, GenerationError>> {
         None
     }
 
     fn content(
         &self,
         _registry: &DefinitionRegistry,
-    ) -> Option<Result<Cow<'static, str>, GenerationError>> {
+    ) -> Option<Result<AddonOutput<'_>, GenerationError>> {
         None
     }
 
-    fn postamble(&self, _registry: &DefinitionRegistry) -> Option<Cow<'static, str>> {
+    fn postamble(
+        &self,
+        _registry: &DefinitionRegistry,
+    ) -> Option<Result<AddonOutput<'_>, GenerationError>> {
         None
     }
 }
@@ -163,5 +202,3 @@ pub fn write_sources(
 
     Ok(())
 }
-
-pub use cpp::{CxxGenerator, GlazeGenerator};

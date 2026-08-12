@@ -1,6 +1,6 @@
 use itertools::Itertools;
 
-use crate::generators::{Addon, CxxGenerator, GenerationError};
+use crate::generators::{Addon, AddonOutput, GenerationError, WithAddons, cpp::CxxGenerator};
 
 use crate::intermediate::{
     ArraySeparator, ArraySize, BoolEncoding, DataType, Definition, DefinitionRegistry, Encoding,
@@ -9,16 +9,28 @@ use crate::intermediate::{
 
 const TAB: &str = "    ";
 
-#[derive(Debug, Clone)]
-pub struct GlazeGenerator;
+#[derive(Debug, Default)]
+pub struct GlazeAddon {
+    addons: Vec<Box<dyn Addon<For = Self>>>,
+}
 
-impl Addon for GlazeGenerator {
+impl WithAddons for GlazeAddon {
+    fn add_addon<T>(&mut self, addon: T)
+    where
+        T: Addon<For = Self> + 'static,
+        Self: Sized,
+    {
+        self.addons.push(Box::new(addon));
+    }
+}
+
+impl Addon for GlazeAddon {
     type For = CxxGenerator;
 
     fn content(
         &self,
         registry: &DefinitionRegistry,
-    ) -> Option<Result<std::borrow::Cow<'static, str>, GenerationError>> {
+    ) -> Option<Result<AddonOutput<'_>, GenerationError>> {
         let generated_sources: Result<Vec<String>, GenerationError> = registry
             .all_definitions()
             .filter_map(|def| match registry.get(def) {
@@ -42,7 +54,9 @@ impl Addon for GlazeGenerator {
         "
                 );
 
-                Some(Ok(content.into()))
+                Some(Ok(AddonOutput::InsertInCurrent {
+                    content: content.into(),
+                }))
             }
             Err(e) => Some(Err(e)),
         }

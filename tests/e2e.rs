@@ -8,7 +8,11 @@ use std::{
 };
 
 use packet_generator::{
-    generators::{self, Generator, GlazeGenerator, WithAddons, write_sources},
+    generators::{
+        Generator, WithAddons,
+        cpp::{CxxGenerator, GlazeAddon},
+        write_sources,
+    },
     intermediate::DefinitionRegistry,
     kdl_parser::{ParserOpts, ParsingWarnings},
 };
@@ -40,8 +44,9 @@ fn generic_e2e_cxx_glaze_harness(path_entrypoint: PathBuf, test_name: &str) {
 
     let _ = std::fs::create_dir_all(&generation_basepath);
 
-    let mut generator = generators::CxxGenerator::new();
-    generator.add_addon(GlazeGenerator {});
+    let mut generator = CxxGenerator::new();
+    let glaze = GlazeAddon::default();
+    generator.add_addon(glaze);
 
     let sources = generator
         .generate(&defs, "main")
