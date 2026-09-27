@@ -434,7 +434,7 @@ mod tests {
 
         json.add_field(JsonField {
             index: 0,
-            name: arced_name.clone(),
+            name: Arc::clone(&arced_name),
             key: String::new(),
             type_: DataType::String,
             optional: false,
@@ -446,7 +446,7 @@ mod tests {
 
         int_enum.add_variant(IntEnumVariant {
             index: 0,
-            name: arced_name.clone(),
+            name: Arc::clone(&arced_name),
             doc: String::new(),
             value: None,
         });

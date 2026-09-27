@@ -20,19 +20,6 @@ use crate::cli::CxxSerializer;
 
 mod cli;
 
-#[derive(Debug, thiserror::Error)]
-#[expect(dead_code)]
-enum ApplicationError {
-    #[error(transparent)]
-    MietteReport(#[from] ParsingError),
-
-    #[error(transparent)]
-    Diagnostic(#[from] Diagnostic),
-
-    #[error(transparent)]
-    Generation(#[from] GenerationError),
-}
-
 fn main() -> Result<(), miette::Report> {
     let args = cli::parse_args();
 
