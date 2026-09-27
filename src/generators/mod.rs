@@ -13,10 +13,7 @@ use std::{
 use atomicow::CowArc;
 use petgraph::{algo::Cycle, graph::NodeIndex};
 
-use crate::intermediate::{
-    DataType, DefinitionRegistry, IntEnum, IntEnumVariant, Json, JsonField, StringEnum,
-    StringEnumVariant,
-};
+use crate::intermediate::{DefinitionRegistry, schema::*};
 
 pub mod cpp;
 mod utils;
@@ -72,7 +69,7 @@ pub trait Generator {
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum GenerationError {
     /// We needed to look into a
-    /// [`Definition`](crate::intermediate::Definition),
+    /// [`Definition`],
     /// but the [`DefinitionRegistry`] expired in the meantime.
     ///
     /// Use this when converting [`std::sync::Weak`] into [`std::sync::Arc`]

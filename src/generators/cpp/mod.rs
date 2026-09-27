@@ -10,9 +10,7 @@ use stringcase::Caser;
 
 use crate::generators::{GeneratedSource, GenerationError, Generator};
 
-use crate::intermediate::{
-    ArraySize, DataType, Definition, DefinitionRegistry, IntEnum, Json, JsonField, StringEnum,
-};
+use crate::intermediate::{DefinitionRegistry, schema::*};
 
 /// The JSON library to use for serialization and deserialization.
 #[derive(Debug, Clone, Copy)]
@@ -162,10 +160,7 @@ impl Generator for CxxGenerator {
         CowArc::Owned(enum_format(&definition.name).into())
     }
 
-    fn int_enum_variant_name<'a>(
-        &'a self,
-        definition: &'a crate::intermediate::IntEnumVariant,
-    ) -> CowArc<'a, str> {
+    fn int_enum_variant_name<'a>(&'a self, definition: &'a IntEnumVariant) -> CowArc<'a, str> {
         CowArc::Owned(enum_variant_format(&definition.name).into())
     }
 
@@ -175,7 +170,7 @@ impl Generator for CxxGenerator {
 
     fn string_enum_variant_name<'a>(
         &'a self,
-        definition: &'a crate::intermediate::StringEnumVariant,
+        definition: &'a StringEnumVariant,
     ) -> CowArc<'a, str> {
         CowArc::Owned(enum_variant_format(&definition.name).into())
     }
