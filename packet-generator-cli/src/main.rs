@@ -10,8 +10,8 @@ use miette::{Context, IntoDiagnostic, miette};
 use packet_generator::generators::write_sources;
 use packet_generator::kdl_parser::UnparsedKdl;
 use packet_generator::{
-    generators::{self, GenerationError, Generator, cpp::CxxGenerator, write_sources},
-    kdl_parser::{Diagnostic, ParserOpts, ParsingError},
+    generators::{self, Generator, cpp::CxxGenerator},
+    kdl_parser::ParserOpts,
 };
 
 use packet_generator_cli::read_all_kdls_from_directory;

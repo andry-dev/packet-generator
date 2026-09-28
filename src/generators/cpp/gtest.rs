@@ -2,7 +2,7 @@ use stringcase::Caser;
 
 use crate::{
     generators::GenerationError,
-    intermediate::{DefinitionRegistry, Json},
+    intermediate::{DefinitionRegistry, schema::Json},
 };
 
 #[expect(

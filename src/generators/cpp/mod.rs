@@ -468,7 +468,7 @@ mod tests {
     }
 
     const TEST_NAME: &str = "any-random_namedSequence-Of_characters";
-    const TEST_GENERATOR: CxxGenerator = CxxGenerator::new();
+    const TEST_GENERATOR: CxxGenerator = CxxGenerator::new(JSONLibrary::Glaze, None);
     static TEST_DATA: LazyLock<SyntheticData> = LazyLock::new(build_synthetic_definitions);
 
     #[test]
@@ -528,24 +528,6 @@ mod tests {
                 .as_ref(),
             expected
         );
-    }
-
-    #[test]
-    fn can_add_addons() {
-        #[derive(Debug, Clone)]
-        struct MockAddon {}
-        impl Addon for MockAddon {
-            type For = CxxGenerator;
-        }
-
-        let mut generator = CxxGenerator::new();
-        assert!(generator.addons.is_empty());
-
-        generator.add_addon(MockAddon {});
-        generator.add_addon(MockAddon {});
-        generator.add_addon(MockAddon {});
-
-        assert_eq!(generator.addons.len(), 3);
     }
 
     #[test]
