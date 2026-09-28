@@ -5,7 +5,6 @@
 //! packets in a given language.
 
 use std::{
-    borrow::Cow,
     fmt::Debug,
     io::Write,
     path::{Path, PathBuf},
@@ -19,7 +18,7 @@ use crate::intermediate::{
     StringEnumVariant,
 };
 
-mod cpp;
+pub mod cpp;
 mod utils;
 
 #[derive(Debug, Clone)]
@@ -29,7 +28,12 @@ pub struct GeneratedSource {
 }
 
 pub trait Generator {
+    /// Generates one or more source files from the given registry.
+    ///
     /// # Errors
+    ///
+    /// Returns [`GenerationError`] if there was a problem generating the
+    /// source.
     fn generate(
         &self,
         registry: &DefinitionRegistry,
@@ -61,32 +65,6 @@ pub trait Generator {
         definition: &'a StringEnumVariant,
     ) -> CowArc<'a, str> {
         CowArc::Borrowed(&definition.name)
-    }
-}
-
-pub trait WithAddons {
-    fn add_addon<T>(&mut self, addon: T)
-    where
-        T: Addon<For = Self> + 'static,
-        Self: Sized;
-}
-
-pub trait Addon: Debug {
-    type For;
-
-    fn preamble(&self, _registry: &DefinitionRegistry) -> Option<Cow<'static, str>> {
-        None
-    }
-
-    fn content(
-        &self,
-        _registry: &DefinitionRegistry,
-    ) -> Option<Result<Cow<'static, str>, GenerationError>> {
-        None
-    }
-
-    fn postamble(&self, _registry: &DefinitionRegistry) -> Option<Cow<'static, str>> {
-        None
     }
 }
 
@@ -163,5 +141,3 @@ pub fn write_sources(
 
     Ok(())
 }
-
-pub use cpp::{CxxGenerator, GlazeGenerator};

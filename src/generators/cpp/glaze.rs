@@ -1,53 +1,66 @@
 use itertools::Itertools;
 
-use crate::generators::{Addon, CxxGenerator, GenerationError};
+use crate::generators::GenerationError;
 
 use crate::intermediate::{
-    ArraySeparator, ArraySize, BoolEncoding, DataType, Definition, DefinitionRegistry, Encoding,
-    Json,
+    ArraySeparator, ArraySize, BoolEncoding, DataType, DefinitionRegistry, Encoding, Json,
 };
 
 const TAB: &str = "    ";
 
-#[derive(Debug, Clone)]
-pub struct GlazeGenerator;
-
-impl Addon for GlazeGenerator {
-    type For = CxxGenerator;
-
-    fn content(
-        &self,
-        registry: &DefinitionRegistry,
-    ) -> Option<Result<std::borrow::Cow<'static, str>, GenerationError>> {
-        let generated_sources: Result<Vec<String>, GenerationError> = registry
-            .all_definitions()
-            .filter_map(|def| match registry.get(def) {
-                Definition::Json(json) => Some(generate_json_cxx(registry, json)),
-                _ => None,
-            })
-            .collect();
-
-        match generated_sources {
-            Ok(content) => {
-                let inner = content.join("\n\n");
-
-                let content = format!(
-                    "// Auto-generated Glaze definitions
-#if __has_include(<glaze/glaze.hpp>)
-#include <pkgen_glaze_helpers.hpp>
-
-{inner}
-
-#endif // __has_include(<glaze/glaze.hpp>)
-        "
-                );
-
-                Some(Ok(content.into()))
-            }
-            Err(e) => Some(Err(e)),
-        }
-    }
-}
+// #[derive(Debug, Default)]
+// pub struct GlazeAddon {
+//     addons: Vec<Box<dyn Addon<For = Self>>>,
+// }
+//
+// impl WithAddons for GlazeAddon {
+//     fn add_addon<T>(&mut self, addon: T)
+//     where
+//         T: Addon<For = Self> + 'static,
+//         Self: Sized,
+//     {
+//         self.addons.push(Box::new(addon));
+//     }
+// }
+//
+// impl Addon for GlazeAddon {
+//     type For = CxxGenerator;
+//
+//     fn content(
+//         &self,
+//         registry: &DefinitionRegistry,
+//     ) -> Option<Result<AddonOutput<'_>, GenerationError>> {
+//         let generated_sources: Result<Vec<String>, GenerationError> =
+// registry             .all_definitions()
+//             .filter_map(|def| match registry.get(def) {
+//                 Definition::Json(json) => Some(generate_json_cxx(registry,
+// json)),                 _ => None,
+//             })
+//             .collect();
+//
+//         match generated_sources {
+//             Ok(content) => {
+//                 let inner = content.join("\n\n");
+//
+//                 let content = format!(
+//                     "// Auto-generated Glaze definitions
+// #if __has_include(<glaze/glaze.hpp>)
+// #include <pkgen_glaze_helpers.hpp>
+//
+// {inner}
+//
+// #endif // __has_include(<glaze/glaze.hpp>)
+//         "
+//                 );
+//
+//                 Some(Ok(AddonOutput::InsertInCurrent {
+//                     content: content.into(),
+//                 }))
+//             }
+//             Err(e) => Some(Err(e)),
+//         }
+//     }
+// }
 
 const fn get_glz_array_separator(sep: ArraySeparator) -> char {
     match sep {
@@ -124,7 +137,18 @@ fn get_glz_mapper(
     }
 }
 
-fn generate_json_cxx(
+pub(super) const fn preamble() -> &'static str {
+    "// Auto-generated Glaze definitions
+#if __has_include(<glaze/glaze.hpp>)
+#include <pkgen_glaze_helpers.hpp>
+        "
+}
+
+pub(super) const fn postamble() -> &'static str {
+    r#"#endif // __has_include(<glaze/glaze.hpp>)"#
+}
+
+pub(super) fn generate_json_cxx(
     registry: &DefinitionRegistry,
     json: &Json,
 ) -> Result<String, GenerationError> {

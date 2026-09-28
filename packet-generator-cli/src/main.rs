@@ -7,9 +7,8 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 use std::{env::current_dir, path::PathBuf};
 
 use miette::{Context, miette};
-use packet_generator::generators::write_sources;
 use packet_generator::{
-    generators::{CxxGenerator, GenerationError, Generator, GlazeGenerator, WithAddons},
+    generators::{self, GenerationError, Generator, cpp::CxxGenerator, write_sources},
     kdl_parser::{Diagnostic, ParserOpts, ParsingError},
 };
 
@@ -70,19 +69,18 @@ fn main() -> Result<(), miette::Report> {
 
             let generator = match language {
                 cli::ProgrammingLanguage::Cxx(options) => {
-                    let mut cxx_generator = CxxGenerator::new();
-
-                    match options.serializer {
-                        CxxSerializer::Glaze => {
-                            cxx_generator.add_addon(GlazeGenerator {});
-                        }
+                    let json_library = match options.serializer {
+                        CxxSerializer::Glaze => generators::cpp::JSONLibrary::Glaze,
 
                         CxxSerializer::Simdjson => {
-                            return Err(miette::miette!(
-                                "Simdjson secondary generator for Cxx is not implemented!"
-                            ));
+                            return Err(miette::miette!("Simdjson is not implemented!"));
                         }
-                    }
+                    };
+
+                    let cxx_generator = CxxGenerator::new(
+                        json_library,
+                        Some(generators::cpp::TestingLibrary::GoogleTest),
+                    );
 
                     Box::new(cxx_generator)
                 }

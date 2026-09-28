@@ -1,18 +1,32 @@
+use std::borrow::Cow;
 use std::path::PathBuf;
 
 mod glaze;
-
-pub use glaze::GlazeGenerator;
+mod gtest;
 
 use atomicow::CowArc;
 use itertools::Itertools;
 use stringcase::Caser;
 
-use crate::generators::{Addon, GeneratedSource, GenerationError, Generator, WithAddons};
+use crate::generators::{GeneratedSource, GenerationError, Generator};
 
 use crate::intermediate::{
     ArraySize, DataType, Definition, DefinitionRegistry, IntEnum, Json, JsonField, StringEnum,
 };
+
+/// The JSON library to use for serialization and deserialization.
+#[derive(Debug, Clone, Copy)]
+pub enum JSONLibrary {
+    Glaze,
+    // Simdjson
+}
+
+/// The testing library to use for generating end-to-end roundtrip tests.
+#[derive(Debug, Clone, Copy)]
+pub enum TestingLibrary {
+    GoogleTest,
+    // Catch
+}
 
 const AUTOGENERATION_NOTICE: &str = "
 // This file is auto-generated from a KDL specification by `packet-generator`.
@@ -42,21 +56,27 @@ fn field_format(string: &str) -> String {
 
 #[derive(Debug)]
 pub struct CxxGenerator {
-    addons: Vec<Box<dyn Addon<For = Self>>>,
+    json_library: JSONLibrary,
+    #[expect(
+        unused,
+        reason = "Round-trip (de)serialiation testing is not implemented yet."
+    )]
+    testing_library: Option<TestingLibrary>,
     _private: (),
 }
 
 impl Default for CxxGenerator {
     fn default() -> Self {
-        Self::new()
+        Self::new(JSONLibrary::Glaze, None)
     }
 }
 
 impl CxxGenerator {
     #[must_use]
-    pub const fn new() -> Self {
+    pub const fn new(json_library: JSONLibrary, testing_library: Option<TestingLibrary>) -> Self {
         Self {
-            addons: vec![],
+            json_library,
+            testing_library,
             _private: (),
         }
     }
@@ -78,16 +98,13 @@ impl Generator for CxxGenerator {
 "#
         );
 
-        for addon in &self.addons {
-            if let Some(preamble) = addon.preamble(registry) {
-                content.push_str(&preamble);
-                content.push_str("\n\n");
-            }
-        }
+        let sorted_definitions = registry
+            .sorted_definitions()
+            .map_err(GenerationError::CycleFound)?;
 
-        let forward_definitions: Result<Vec<String>, _> = registry
-            .all_definitions()
-            .map(|def| match registry.get(def) {
+        let forward_definitions: Result<Vec<String>, _> = sorted_definitions
+            .iter()
+            .map(|&def| match registry.get(def) {
                 Definition::Json(json) => Ok(format!("struct {};", struct_format(&json.name))),
                 Definition::IntEnum(int_enum) => {
                     Ok(format!("enum class {};", enum_format(&int_enum.name)))
@@ -99,9 +116,7 @@ impl Generator for CxxGenerator {
         content.push_str(&forward_definitions?.join("\n\n"));
         content.push_str("\n\n");
 
-        let generated_sources: Result<Vec<String>, _> = registry
-            .sorted_definitions()
-            .map_err(GenerationError::CycleFound)?
+        let generated_sources: Result<Vec<String>, _> = sorted_definitions
             .iter()
             .filter_map(|&def| match registry.get(def) {
                 Definition::Json(json) => Some(generate_json_cxx(registry, json)),
@@ -113,17 +128,19 @@ impl Generator for CxxGenerator {
         content.push_str(&generated_sources?.join("\n\n"));
         content.push_str("\n\n");
 
-        for addon in &self.addons {
-            if let Some(addon_content) = addon.content(registry) {
-                content.push_str(&addon_content?);
-                content.push('\n');
-            }
-        }
+        match self.json_library {
+            JSONLibrary::Glaze => {
+                content.push_str(glaze::preamble());
 
-        for addon in &self.addons {
-            if let Some(postamble) = addon.postamble(registry) {
-                content.push_str(&postamble);
-                content.push_str("\n\n");
+                for def in sorted_definitions {
+                    if let Definition::Json(json) = registry.get(def) {
+                        let content_string = glaze::generate_json_cxx(registry, json)?;
+                        content.push_str(&content_string);
+                        content.push_str("\n\n");
+                    }
+                }
+
+                content.push_str(glaze::postamble());
             }
         }
 
@@ -164,45 +181,35 @@ impl Generator for CxxGenerator {
     }
 }
 
-impl WithAddons for CxxGenerator {
-    fn add_addon<T>(&mut self, addon: T)
-    where
-        T: super::Addon<For = Self> + 'static,
-        Self: Sized,
-    {
-        self.addons.push(Box::new(addon));
-    }
-}
-
 /// Converts a `DataType` to types recognized by C++.
 fn convert_datatype(
     datatype: &DataType,
     registry: &DefinitionRegistry,
-) -> Result<String, GenerationError> {
+) -> Result<Cow<'static, str>, GenerationError> {
     match datatype {
-        DataType::I32 { .. } => Ok(String::from("int32_t")),
+        DataType::I32 { .. } => Ok(Cow::Borrowed("int32_t")),
 
-        DataType::U32 { .. } => Ok(String::from("uint32_t")),
+        DataType::U32 { .. } => Ok(Cow::Borrowed("uint32_t")),
 
-        DataType::I64 { .. } => Ok(String::from("int64_t")),
+        DataType::I64 { .. } => Ok(Cow::Borrowed("int64_t")),
 
-        DataType::U64 { .. } => Ok(String::from("uint64_t")),
+        DataType::U64 { .. } => Ok(Cow::Borrowed("uint64_t")),
 
         // Custom `float`/`double` to support C++20 floating point.
-        DataType::F32 { .. } => Ok(String::from("pkg::float32")),
-        DataType::F64 => Ok(String::from("pkg::float64")),
+        DataType::F32 { .. } => Ok(Cow::Borrowed("pkg::float32")),
+        DataType::F64 => Ok(Cow::Borrowed("pkg::float64")),
 
-        DataType::Bool { .. } => Ok(String::from("bool")),
+        DataType::Bool { .. } => Ok(Cow::Borrowed("bool")),
 
-        DataType::String => Ok(String::from("std::string")),
+        DataType::String => Ok(Cow::Borrowed("std::string")),
 
-        DataType::Datetime | DataType::DatetimeUnix => Ok(String::from("pkg::chrono_time")),
+        DataType::Datetime | DataType::DatetimeUnix => Ok(Cow::Borrowed("pkg::chrono_time")),
 
         DataType::Map { key, value } => {
             let key = convert_datatype(key, registry)?;
             let value = convert_datatype(value, registry)?;
 
-            Ok(format!("std::unordered_map<{key}, {value}>"))
+            Ok(Cow::Owned(format!("std::unordered_map<{key}, {value}>")))
         }
 
         DataType::Array {
@@ -211,7 +218,7 @@ fn convert_datatype(
         } => {
             let inner = convert_datatype(inner_type, registry)?;
 
-            Ok(format!("std::vector<{inner}>"))
+            Ok(Cow::Owned(format!("std::vector<{inner}>")))
         }
 
         DataType::Array {
@@ -222,7 +229,7 @@ fn convert_datatype(
 
             match size.get() {
                 1 => Ok(inner),
-                n => Ok(format!("std::array<{inner}, {n}>")),
+                n => Ok(Cow::Owned(format!("std::array<{inner}, {n}>"))),
             }
         }
 
@@ -233,7 +240,7 @@ fn convert_datatype(
         } => {
             let inner = convert_datatype(inner_type, registry)?;
 
-            Ok(format!("pkg::string_list<{inner}>"))
+            Ok(Cow::Owned(format!("pkg::string_list<{inner}>")))
         }
 
         DataType::StringArray {
@@ -257,22 +264,22 @@ fn convert_datatype(
             let definition = registry.get(*weak);
             match *definition {
                 Definition::StringEnum(ref str_enum) => {
-                    Ok(format!("{}::Type", enum_format(&str_enum.name)))
+                    Ok(Cow::Owned(format!("{}::Type", enum_format(&str_enum.name))))
                 }
 
-                Definition::Json(ref json) => Ok(struct_format(&json.name)),
-                Definition::IntEnum(ref int_enum) => Ok(enum_format(&int_enum.name)),
+                Definition::Json(ref json) => Ok(Cow::Owned(struct_format(&json.name))),
+                Definition::IntEnum(ref int_enum) => Ok(Cow::Owned(enum_format(&int_enum.name))),
             }
         }
 
         DataType::Unknown { name: other, .. } => match registry.find(other) {
             Some((definition, _idx)) => match definition {
                 Definition::StringEnum(str_enum) => {
-                    Ok(format!("{}::Type", enum_format(&str_enum.name)))
+                    Ok(Cow::Owned(format!("{}::Type", enum_format(&str_enum.name))))
                 }
 
-                Definition::Json(json) => Ok(struct_format(&json.name)),
-                Definition::IntEnum(int_enum) => Ok(enum_format(&int_enum.name)),
+                Definition::Json(json) => Ok(Cow::Owned(struct_format(&json.name))),
+                Definition::IntEnum(int_enum) => Ok(Cow::Owned(enum_format(&int_enum.name))),
             },
 
             None => Err(GenerationError::TypeNotFound {
@@ -299,7 +306,7 @@ fn generate_json_cxx(
             let mut datatype = convert_datatype(&field.type_, registry)?;
 
             if field.optional {
-                datatype = format!("std::optional<{datatype}>");
+                datatype = Cow::Owned(format!("std::optional<{datatype}>"));
             }
 
             let name = field_format(&field.name);
