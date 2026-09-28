@@ -16,9 +16,9 @@ use petgraph::{algo::Cycle, graph::NodeIndex};
 use crate::intermediate::{DefinitionRegistry, schema::*};
 
 pub mod cpp;
-mod utils;
+pub mod utils;
 
-pub use cpp::{CxxGenerator, GlazeGenerator};
+pub use cpp::CxxGenerator;
 
 #[derive(Debug, Clone)]
 pub struct GeneratedSource {
